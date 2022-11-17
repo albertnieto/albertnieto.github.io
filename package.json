@@ -2,6 +2,7 @@
   "name": "portfolio_albert_nieto",
   "description": "Hi there!",
   "main": "src/index.jsx",
+  "homepage":"https://albertnieto.github.io",
   "keywords": [
     "react",
     "r3f",
