@@ -8,6 +8,30 @@
  */
 
 (function () {
+    // --- PART 1: NEGATIVE VISUAL CURSOR ---
+    // Specifically an "arrow" or small pointer as requested, but standard cursor: none + custom div
+    // User said "negative is only the arrow". We can try to make a custom arrow shape or just a small circle.
+    // Let's make a small circle that acts as the pointer.
+
+    const cursor = document.createElement('div');
+    Object.assign(cursor.style, {
+        position: 'fixed',
+        top: '0', left: '0',
+        width: '15px', height: '15px', // Small pointer size
+        borderRadius: '50%',
+        backgroundColor: 'white',
+        mixBlendMode: 'difference', // The "Negative" effect
+        pointerEvents: 'none',
+        zIndex: '9999',
+        transform: 'translate(-50%, -50%)',
+        transition: 'transform 0.1s',
+    });
+    document.body.appendChild(cursor);
+
+    // Hide default cursor
+    document.body.style.cursor = 'none';
+
+    // --- PART 2: WEBGL SHADER SYSTEM ---
     const checkThree = setInterval(() => {
         if (window.THREE) {
             clearInterval(checkThree);
@@ -16,7 +40,7 @@
     }, 100);
 
     function initThreeJS() {
-        console.log("Initializing Fused Shader System");
+        console.log("Initializing Fused Shader System (V3 Refined)");
 
         const container = document.createElement('div');
         Object.assign(container.style, {
@@ -27,7 +51,8 @@
 
         const style = document.createElement('style');
         style.innerHTML = `
-            body, html, .page__content, .initial-content, .page { background-color: transparent !important; }
+            body, html, .page__content, .initial-content, .page { background-color: transparent !important; cursor: none !important; }
+            a, button, input { cursor: none !important; } /* Force no cursor everywhere */
             #fusion-container { pointer-events: none; z-index: -1; }
         `;
         document.head.appendChild(style);
@@ -58,12 +83,12 @@
         }
         const p = new Uint8Array(512);
         const permutation = new Uint8Array(256);
-        for (let i = 0; i < 256; i++) permutation[i] = i;
-        for (let i = 255; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [permutation[i], permutation[j]] = [permutation[j], permutation[i]];
+        for (let j = 0; j < 256; j++) permutation[j] = j;
+        for (let j = 255; j > 0; j--) {
+            const k = Math.floor(Math.random() * (j + 1));
+            [permutation[j], permutation[k]] = [permutation[k], permutation[j]];
         }
-        for (let i = 0; i < 512; i++) p[i] = permutation[i & 255];
+        for (let j = 0; j < 512; j++) p[j] = permutation[j & 255];
         function noise3D(x, y, z) {
             const X = Math.floor(x) & 255, Y = Math.floor(y) & 255, Z = Math.floor(z) & 255;
             x -= Math.floor(x); y -= Math.floor(y); z -= Math.floor(z);
@@ -106,6 +131,8 @@
             u_time: { value: 0.0 },
             u_resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
             u_mouse: { value: new THREE.Vector2(0, 0) },
+            u_click_time: { value: -100.0 },
+            u_click_pos: { value: new THREE.Vector2(0, 0) },
             u_noiseTex: { value: texture3D },
             // React Shader Props mapped to uniforms
             u_speed: { value: 1.0 },
@@ -131,6 +158,8 @@
                 uniform vec2 u_resolution;
                 uniform float u_time;
                 uniform vec2 u_mouse;
+                uniform float u_click_time;
+                uniform vec2 u_click_pos;
                 
                 // Fusion Uniforms
                 uniform float u_speed;
@@ -158,7 +187,28 @@
                     return dot(cos(GOLD * p), sin(PHI * p * GOLD));
                 }
 
-                vec3 getDotFieldColor(vec2 uv) {
+                // Subtle Elegant Ripple
+                float getRipple(vec2 uv) {
+                    vec2 aspect = vec2(u_resolution.x/u_resolution.y, 1.0);
+                    vec2 clickNDC = (u_click_pos / u_resolution.xy) * 2.0 - 1.0;
+                    clickNDC.y *= -1.0;
+                    clickNDC.x *= aspect.x;
+                    
+                    vec2 pScreen = (vUv - 0.5) * 2.0 * aspect;
+                    float dist = distance(pScreen, clickNDC);
+                    float t = u_time - u_click_time;
+                    
+                    if (t > 0.0 && t < 3.0) {
+                        float wavePos = t * 0.8; // Slower
+                        float waveWidth = 0.5; // Wider, softer
+                        float w = smoothstep(waveWidth, 0.0, abs(dist - wavePos));
+                        // Soft fade, gentle amplitude
+                        return w * exp(-t * 2.0) * 0.3; 
+                    }
+                    return 0.0;
+                }
+
+                vec3 getDotFieldColor(vec2 uv, float ripple) {
                     float t = -u_time * u_speed * 0.5 - 500.0; // Slower speed for elegance
                     vec3 d = normalize(vec3(uv, -1.0)); // Camera looking Z-
                     vec3 p = vec3(0, 0, t);
@@ -171,8 +221,11 @@
                         float s = abs(dot_noise(rp) + (p.y)) * 0.1 + 0.015;
                         p += d * s;
                         
+                        // Ripple gently shifts color phase
+                        float shift = u_colorShift + ripple * 2.0;
+
                         // Accumulate radiance
-                        vec3 shine = (sin(p.z * 0.5 - vec3(0.5, 0.8, 0.9) * u_colorShift) / (abs(s * 0.001) + 1e-6));
+                        vec3 shine = (sin(p.z * 0.5 - vec3(0.5, 0.8, 0.9) * shift) / (abs(s * 0.001) + 1e-6));
                         
                         // Moving orb influence
                         vec3 orb = 0.3 * vec3(7, 4, 1) / 
@@ -198,7 +251,7 @@
                     return (1.0 - g2) / (4.0 * 3.14159 * pow(1.0 + g2 - 2.0 * g * dotViewLight, 1.5));
                 }
 
-                vec3 getSmokeColor(vec2 uv) {
+                vec3 getSmokeColor(vec2 uv, float ripple) {
                     vec3 ro = vec3(0.0, 0.0, 2.0);
                     vec3 rd = normalize(vec3(uv, -1.0));
                     
@@ -221,6 +274,10 @@
                         if (abs(p.x)>4.0 || abs(p.y)>4.0 || p.z<-4.0) break;
 
                         float dens = mapSmoke(p);
+                        
+                        // Ripple makes smoke momentarily denser/lighter
+                        dens += ripple * 0.5 * smoothstep(0.0, 1.0, 1.0-abs(p.z));
+
                         if (dens > 0.01) {
                             vec3 ld = normalize(lightPos - p);
                             float shadow = exp(-mapSmoke(p + ld * 0.4) * 6.0);
@@ -262,11 +319,17 @@
                     vec2 uv = (vUv - 0.5) * 2.0;
                     uv.x *= u_resolution.x / u_resolution.y;
 
+                    // Ripple Calc
+                    float ripple = getRipple(uv);
+                    
+                    // Subtle distortion of UVs for background field
+                    vec2 distortedUV = uv + normalize(uv) * ripple * 0.02;
+
                     // 1. Get Dot Field (Background Energy)
-                    vec3 field = getDotFieldColor(uv);
+                    vec3 field = getDotFieldColor(distortedUV, ripple);
                     
                     // 2. Get Volumetric Smoke (Foreground)
-                    vec3 smoke = getSmokeColor(uv);
+                    vec3 smoke = getSmokeColor(distortedUV, ripple);
 
                     // 3. Fuse
                     // Use the field as a glowing background behind the smoke
@@ -294,6 +357,21 @@
         });
         window.addEventListener('mousemove', (e) => {
             uniforms.u_mouse.value.set(e.clientX, e.clientY);
+
+            // Move negative cursor
+            cursor.style.left = e.clientX + 'px';
+            cursor.style.top = e.clientY + 'px';
+        });
+
+        window.addEventListener('click', (e) => {
+            uniforms.u_click_time.value = performance.now() / 1000;
+            uniforms.u_click_pos.value.set(e.clientX, e.clientY);
+
+            // Subtle Scale pop
+            cursor.style.transform = 'translate(-50%, -50%) scale(1.5)';
+            setTimeout(() => {
+                cursor.style.transform = 'translate(-50%, -50%) scale(1)';
+            }, 100);
         });
 
         let clock = new THREE.Clock();
