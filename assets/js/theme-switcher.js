@@ -19,7 +19,15 @@
     btn.id = 'theme-toggle';
     btn.innerHTML = getIcon(isDark);
     btn.title = 'Toggle Theme';
-    document.body.appendChild(btn);
+
+    // Attempt to inject into Masthead (Top Bar)
+    const masthead = document.querySelector('.masthead__inner-wrap');
+    if (masthead) {
+        btn.classList.add('in-navbar'); // Add class for specific styling
+        masthead.appendChild(btn);
+    } else {
+        document.body.appendChild(btn);
+    }
 
     // 4. Handle Click
     btn.addEventListener('click', () => {
