@@ -138,7 +138,8 @@
             u_speed: { value: 1.0 },
             u_intensity: { value: 1.0 },
             u_complexity: { value: 1.0 },
-            u_colorShift: { value: 2.0 } // Slightly shifted for aesthetics
+            u_colorShift: { value: 2.0 }, // Slightly shifted for aesthetics
+            u_darkMode: { value: 1.0 } // 1.0 = Dark, 0.0 = Light
         };
 
         const material = new THREE.ShaderMaterial({
@@ -166,6 +167,7 @@
                 uniform float u_intensity;
                 uniform float u_complexity;
                 uniform float u_colorShift;
+                uniform float u_darkMode;
 
                 varying vec2 vUv;
 
@@ -336,6 +338,14 @@
                     // Also let the field contribute slightly to the smoke lighting (emissive approximation)
                     vec3 final = field * 0.3 + smoke;
 
+                    // INVERT FOR LIGHT MODE
+                    if (u_darkMode < 0.5) {
+                        // Light mode: Invert colors + shift hue/warmth
+                        final = 1.0 - final;
+                        // Tint it slightly blue/purple for elegance in light mode instead of harsh negative
+                        final *= vec3(0.9, 0.95, 1.0); 
+                    }
+
                     // 4. ACES & Gamma
                     // l*l contrast boost from react shader
                     // scaled HDR before ACES -> gamma 2.2
@@ -350,6 +360,24 @@
 
         const mesh = new THREE.Mesh(geometry, material);
         scene.add(mesh);
+
+        // EXPOSE THEME UPDATER
+        window.setShaderTheme = function (isDark) {
+            // Smooth transition could be added here by tweening a float, but for now immediate
+            // or we could tween u_darkMode 0->1
+            const target = isDark ? 1.0 : 0.0;
+            // Simple approach: set value directly. 
+            // For smoother transition we'd need a loop updates, let's just use instant for now
+            // or a manual lerp in animate loop.
+            uniforms.u_darkMode.value = target;
+        };
+
+        // Initial set
+        if (window.isDarkMode && window.isDarkMode()) {
+            uniforms.u_darkMode.value = 1.0;
+        } else {
+            uniforms.u_darkMode.value = 0.0;
+        }
 
         window.addEventListener('resize', () => {
             renderer.setSize(window.innerWidth, window.innerHeight);
